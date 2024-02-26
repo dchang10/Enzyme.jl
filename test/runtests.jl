@@ -26,22 +26,31 @@ using Enzyme_jll
 
 # Test against FiniteDifferences
 function test_scalar(f, x; rtol=1e-9, atol=1e-9, fdm=central_fdm(5, 1), kwargs...)
-    ∂x, = autodiff(Reverse, f, Active, Active(x))[1]
-    if typeof(x) <: Complex
+    ∂x, = autodiff(ReverseHolomorphic, f, Active, Active(x))[1]
+
+    finite_diff = if typeof(x) <: Complex
+      RT = typeof(x).parameters[1]
+      (fdm(dx -> f(x+dx), RT(0)) - im * fdm(dy -> f(x+im*dy), RT(0)))/2
     else
-      @test isapprox(∂x, fdm(f, x); rtol=rtol, atol=atol, kwargs...)
+      fdm(f, x)
     end
 
-    rm = ∂x
+    @test isapprox(∂x, finite_diff; rtol=rtol, atol=atol, kwargs...)
+
     if typeof(x) <: Integer
         x = Float64(x)
     end
-    ∂x, = autodiff(Forward, f, Duplicated(x, one(typeof(x))))
+
     if typeof(x) <: Complex
-      @test ∂x ≈ rm
+        ∂re, = autodiff(Forward, f, Duplicated(x, one(typeof(x))))
+        ∂im, = autodiff(Forward, f, Duplicated(x, im*one(typeof(x))))
+        ∂x = ∂re - im*∂im
     else
-      @test isapprox(∂x, fdm(f, x); rtol=rtol, atol=atol, kwargs...)
+        ∂x, = autodiff(Forward, f, Duplicated(x, one(typeof(x))))
     end
+
+    @test isapprox(∂x, finite_diff; rtol=rtol, atol=atol, kwargs...)
+
 end
 
 function test_matrix_to_number(f, x; rtol=1e-9, atol=1e-9, fdm=central_fdm(5, 1), kwargs...)
@@ -302,7 +311,11 @@ end
     @test autodiff(ReverseHolomorphicWithPrimal, mul2, Active, Active(z))[1][1] ≈ 2.0 + 0.0im
     @test autodiff(ReverseHolomorphicWithPrimal, mul2, Active, Active(z))[2] ≈ 2 * z
 
+    z = 3.4 + 2.7im
     @test autodiff(ReverseHolomorphic, square, Active, Active(z))[1][1] ≈ 2 * z
+    @test autodiff(ReverseHolomorphic, identity, Active, Active(z))[1][1] ≈ 1
+
+    @test autodiff(ReverseHolomorphic, Base.inv, Active, Active(3.0 + 4.0im))[1][1] ≈ 0.0112 - 0.0384im
 
     mul3(z) = Base.inferencebarrier(2 * z)
 
@@ -321,7 +334,7 @@ end
     dvals = Complex{Float64}[0.0]
     autodiff(ReverseHolomorphic, sumsq, Active, Duplicated(vals, dvals))
     @test vals[1] ≈ 3.4 + 2.7im
-    @test dvals[1] ≈ 2 * (3.4 - 2.7im)
+    @test dvals[1] ≈ 2 * (3.4 + 2.7im)
 
     sumsq2(x) = sum(abs2.(x))
     vals = Complex{Float64}[3.4 + 2.7im]
@@ -335,14 +348,14 @@ end
     dvals = Complex{Float64}[0.0]
     autodiff(ReverseHolomorphic, sumsq2C, Active, Duplicated(vals, dvals))
     @test vals[1] ≈ 3.4 + 2.7im
-    @test dvals[1] ≈ 6.8 - 5.4im
+    @test dvals[1] ≈ 3.4 - 2.7im
 
     sumsq3(x) = sum(x .* conj(x))
     vals = Complex{Float64}[3.4 + 2.7im]
     dvals = Complex{Float64}[0.0]
     autodiff(ReverseHolomorphic, sumsq3, Active, Duplicated(vals, dvals))
     @test vals[1] ≈ 3.4 + 2.7im
-    @test dvals[1] ≈ 6.8 - 5.4im
+    @test dvals[1] ≈ 3.4 - 2.7im
 
     sumsq3R(x) = Float64(sum(x .* conj(x)))
     vals = Complex{Float64}[3.4 + 2.7im]
@@ -402,14 +415,14 @@ end
         z = ComplexF64(z)
         return z*z
     end
-    autodiff(ReverseHolomorphic, upgrade, Active, Active(3.1))
+    @test autodiff(ReverseHolomorphic, upgrade, Active, Active(3.1))[1][1] ≈ 6.2
 end
 
 @testset "Simple Exception" begin
     f_simple_exc(x, i) = ccall(:jl_, Cvoid, (Any,), x[i])
     y = [1.0, 2.0]
     f_x = zero.(y)
-    @test_throws BoundsError autodiff(Reverse, f_simple_exc, Duplicated(y, f_x), 0)
+    @test_throws BoundsError autodiff(Reverse, f_simple_exc, Duplicated(y, f_x), Const(0))
 end
 
 
